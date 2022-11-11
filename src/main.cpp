@@ -3,7 +3,9 @@
 #include <WiFiUdp.h>          // Para el NTP
 #include <TimeLib.h>
 #include <ESP8266mDNS.h>      // Include the mDNS library
-#include "LittleFS.h"         // To manage the file system where to store the web pages
+#include "LittleFS.h"        // To manage the file system where to store the web pages
+#include <ESP8266WebServer.h> // Include the WebServer library
+#include <WebSocketsServer.h> // Include to manage Websockets for web page communication to ESP
 
 // -----------------------------------------------------------------------------
 // Constant Declarations
@@ -20,7 +22,11 @@ void wifiSetup();
 void digitalClockDisplay();
 void sendNTPpacket(IPAddress &address);
 void configNTP();
-
+String getContentType(String filename); // convert the file extension to the MIME type
+bool handleFileRead(String path);       // send the right file to the client (if it exists)
+void handleRoot(); // function prototypes for HTTP handlers
+void handleNotFound();
+void configWebSocket();
 // -----------------------------------------------------------------------------
 // Variable Declarations
 // -----------------------------------------------------------------------------
@@ -45,6 +51,11 @@ unsigned int localPort = 8888; // local port to listen for UDP packets
 
 time_t getNtpTime();
 
+// -----------------------------------------------------------------------------
+// WebServer declarations
+// -----------------------------------------------------------------------------
+ESP8266WebServer server(80);    // Create a webserver object that listens for HTTP request on port 80
+WebSocketsServer webSocket(81); // create a websocket server on port 81
 
 
 void setup() {
@@ -55,6 +66,7 @@ void setup() {
     wifiSetup();
     //NTP
     configNTP();
+    digitalClockDisplay();
     //mDNS
       if (MDNS.begin(HOST))
   { // Start the mDNS responder for esp8266.local
@@ -66,17 +78,27 @@ void setup() {
     if (logger)
       Serial.println("Error setting up MDNS responder!");
   }
-
+  // LittleFS
     LittleFS.begin(); // Start the SPI Flash Files System
+  // Websockets
+   configWebSocket(); // Start a WebSocket server
+   // Web Server
+      server.onNotFound([]() {                              // If the client requests any URI
+    if (!handleFileRead(server.uri()))                  // send it if it exists
+      server.send(404, "text/plain", "404: Not Found"); // otherwise, respond with a 404 (Not Found) error
+  });
+
+  server.begin(); // Actually start the server
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
   //mDNS
   MDNS.update();
+  webSocket.loop();
+  server.handleClient(); // Listen for HTTP requests from clients
   //Main program
-  digitalClockDisplay();
-  delay(100);
+
 }
 
 
@@ -215,4 +237,75 @@ void digitalClockDisplay(){
   Serial.print(" ");
   Serial.print(year());
   Serial.println();
+}
+
+// -----------------------------------------------------------------------------
+// WebSockets
+// -----------------------------------------------------------------------------
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t lenght)
+{ // When a WebSocket message is received
+  switch (type)
+  {
+  case WStype_DISCONNECTED: // if the websocket is disconnected
+    if (logger)
+      Serial.printf("[%u] Disconnected!\n", num);
+    break;
+  case WStype_CONNECTED:
+  { // if a new websocket connection is established
+    IPAddress ip = webSocket.remoteIP(num);
+    if (logger)
+      Serial.printf("[%u] Connected from %d.%d.%d.%d url: %s\n", num, ip[0], ip[1], ip[2], ip[3], payload);
+  }
+  break;
+}
+}
+
+void configWebSocket()
+{                                    // Start a WebSocket server
+  webSocket.begin();                 // start the websocket server
+  webSocket.onEvent(webSocketEvent); // if there's an incomming websocket message, go to function 'webSocketEvent'
+  if (logger)
+    Serial.println("WebSocket server started.");
+}
+
+// -----------------------------------------------------------------------------
+// WebServer
+// -----------------------------------------------------------------------------
+String getContentType(String filename)
+{
+  if (filename.endsWith(".html"))
+    return "text/html";
+  else if (filename.endsWith(".css"))
+    return "text/css";
+  else if (filename.endsWith(".js"))
+    return "application/javascript";
+  else if (filename.endsWith(".ico"))
+    return "image/x-icon";
+  else if (filename.endsWith(".gz"))
+    return "application/x-gzip";
+  return "text/plain";
+}
+
+bool handleFileRead(String path)
+{ // send the right file to the client (if it exists)
+  Serial.println("handleFileRead: " + path);
+  if (path.endsWith("/"))
+    path += "index.html";                    // If a folder is requested, send the index file
+  String contentType = getContentType(path); // Get the MIME type
+  String pathWithGz = path + ".gz";
+  if (LittleFS.exists(pathWithGz) || LittleFS.exists(path))
+  {                                       // If the file exists, either as a compressed archive, or normal
+    if (LittleFS.exists(pathWithGz))      // If there's a compressed version available
+      path += ".gz";                      // Use the compressed version
+    File file = LittleFS.open(path, "r"); // Open the file
+    Serial.println(file);
+    size_t sent = server.streamFile(file, contentType); // Send it to the client
+    file.close();                                       // Close the file again
+    if (logger)
+      Serial.println(String("\tSent file: ") + path);
+    return true;
+  }
+  if (logger)
+    Serial.println(String("\tFile Not Found: ") + path);
+  return false; // If the file doesn't exist, return false
 }
