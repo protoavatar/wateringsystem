@@ -1,0 +1,18 @@
+{
+  "name": "pagina",
+  "version": "1.0.0",
+  "description": "Pagina para el ESP8266 con tailwind",
+  "main": "index.html",
+  "scripts": {
+    "dev": "pnpm run tailwindcss -i ./css/tailwind.css  -o ./dist/style.css --watch",
+    "build": "postcss css/tailwind.css -o public/build/tailwind.css"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "autoprefixer": "^10.4.13",
+    "live-server": "^1.2.2",
+    "postcss": "^8.4.19",
+    "postcss-cli": "^10.0.0",
+    "tailwindcss": "^3.2.4"
+  }
+}
