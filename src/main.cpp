@@ -2,12 +2,14 @@
 #include "ESP8266WiFi.h"
 #include <WiFiUdp.h>          // Para el NTP
 #include <TimeLib.h>
+#include <ESP8266mDNS.h>      // Include the mDNS library
 
 // -----------------------------------------------------------------------------
 // Constant Declarations
 // -----------------------------------------------------------------------------
 #define WIFI_SSID "Jacobiano"  //Cambiar por tu WIFI SSID
 #define WIFI_PASS "galgogalgo"  //Cambiar por tu WIFI password
+#define HOST "RIEGOTEST"  //Cambiar por tu WIFI password
 #define SERIAL_BAUDRATE 9600
 
 // -----------------------------------------------------------------------------
@@ -52,11 +54,24 @@ void setup() {
     wifiSetup();
     //NTP
     configNTP();
-
+    //mDNS
+      if (MDNS.begin(HOST))
+  { // Start the mDNS responder for esp8266.local
+    if (logger)
+      Serial.println("mDNS responder started");
+  }
+  else
+  {
+    if (logger)
+      Serial.println("Error setting up MDNS responder!");
+  }
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
+  //mDNS
+  MDNS.update();
+  //Main program
   digitalClockDisplay();
   delay(100);
 }
