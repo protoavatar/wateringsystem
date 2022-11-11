@@ -3,6 +3,7 @@
 #include <WiFiUdp.h>          // Para el NTP
 #include <TimeLib.h>
 #include <ESP8266mDNS.h>      // Include the mDNS library
+#include "LittleFS.h"         // To manage the file system where to store the web pages
 
 // -----------------------------------------------------------------------------
 // Constant Declarations
@@ -65,6 +66,8 @@ void setup() {
     if (logger)
       Serial.println("Error setting up MDNS responder!");
   }
+
+    LittleFS.begin(); // Start the SPI Flash Files System
 }
 
 void loop() {
