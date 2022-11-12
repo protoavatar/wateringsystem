@@ -87,14 +87,15 @@ function Riego(riego) {
     }
 }
 
-function Activar(data) {
-    if (data === "1") {
-        document.getElementById("switch-on").hidden = false;
-        document.getElementById("switch-off").hidden = true;
-        connection.send("<#ACT#1>")
-    } else {
-        document.getElementById("switch-on").hidden = true;
-        document.getElementById("switch-off").hidden = false;
-        connection.send("<#ACT#0>")
-    }
-}
+//Used only if I have several watering valves and want a general enable/disable state for the system
+// function Activar(data) {
+//     if (data === "1") {
+//         document.getElementById("switch-on").hidden = false;
+//         document.getElementById("switch-off").hidden = true;
+//         connection.send("<#ACT#1>")
+//     } else {
+//         document.getElementById("switch-on").hidden = true;
+//         document.getElementById("switch-off").hidden = false;
+//         connection.send("<#ACT#0>")
+//     }
+// }

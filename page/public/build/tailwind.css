@@ -456,9 +456,6 @@ video {
 .h-10 {
   height: 2.5rem;
 }
-.h-8 {
-  height: 2rem;
-}
 .min-h-screen {
   min-height: 100vh;
 }
@@ -488,12 +485,6 @@ video {
 }
 .w-10 {
   width: 2.5rem;
-}
-.w-4\/6 {
-  width: 66.666667%;
-}
-.w-8 {
-  width: 2rem;
 }
 .cursor-pointer {
   cursor: pointer;
@@ -545,6 +536,10 @@ video {
 .bg-gray-400 {
   --tw-bg-opacity: 1;
   background-color: rgb(156 163 175 / var(--tw-bg-opacity));
+}
+.bg-red-500 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(239 68 68 / var(--tw-bg-opacity));
 }
 .bg-gray-700 {
   --tw-bg-opacity: 1;
@@ -611,14 +606,6 @@ video {
 .text-2xl {
   font-size: 1.5rem;
   line-height: 2rem;
-}
-.text-lg {
-  font-size: 1.125rem;
-  line-height: 1.75rem;
-}
-.text-xl {
-  font-size: 1.25rem;
-  line-height: 1.75rem;
 }
 .font-normal {
   font-weight: 400;
