@@ -15,6 +15,7 @@
 #define WIFI_PASS "galgogalgo"  //Cambiar por tu WIFI password
 #define HOST "RIEGOTEST"  //Cambiar por tu WIFI password
 #define SERIAL_BAUDRATE 9600
+#define MAXRIEGO 1800 // Safety meassure to turn off watering in case you forgot that you turned it on. In Seconds (This is 30 minutes: 1800s)
 
 // -----------------------------------------------------------------------------
 // Funtion Declarations
@@ -30,6 +31,8 @@ void handleNotFound();
 void configWebSocket();
 const char *LeerProgramacion(int addr); // Read Programing sent from page
 void GrabarProgramacion(char payload[39]); // Save Programming on memory
+void rutinaProgramacion(); // Watering programing routine
+time_t tmConvert_t(int YYYY, byte MM, byte DD, byte hh, byte mm, byte ss); // helper function to change from ASCII to time
 // -----------------------------------------------------------------------------
 // Variable Declarations
 // -----------------------------------------------------------------------------
@@ -38,6 +41,8 @@ boolean logger = true;
 char EstadoRiego[28] = "<#RIE#R1-0R2-0R3-0R4-0RT-0>";
 char CodigoEnvio[6] = "#RIE#";
 char *Programacion = "<#PRG#R1E-1R1H-12:00R1T-05R1D-1234567>";
+time_t HoraEncendido = now(); // store the current time in time variable t
+char RiegoP[5] = "1111"; // Variable to manage the day change with the programing (In this case example for 4 watering lines, only using the first one in this project)
 // Case used only when ESP (eg NodeMCU) uses several watering lines and what a general disabled state for all
 //char Activado[9] = "<#ACT#0>";
 
@@ -65,6 +70,14 @@ time_t getNtpTime();
 // -----------------------------------------------------------------------------
 ESP8266WebServer server(80);    // Create a webserver object that listens for HTTP request on port 80
 WebSocketsServer webSocket(81); // create a websocket server on port 81
+
+// -----------------------------------------------------------------------------
+// Pinout configuration for relays
+// -----------------------------------------------------------------------------
+// For ESP+Relay modules that manage the relay via the serial port (Instead of GPIO), in my case this happened for a lighting system (Not this project)
+//byte relON[] = {0xA0, 0x01, 0x01, 0xA2};  //Hex command to send to onboard serial microprocessor for open relay
+//byte relOFF[] = {0xA0, 0x01, 0x00, 0xA1}; //Hex command to send to serial for close relay
+// For ESP+Relay modules that manage the relay via GPIO port, see below in setup
 
 
 void setup() {
@@ -99,6 +112,10 @@ void setup() {
   // EEPROM Initialization
   EEPROM.begin(61);
   server.begin(); // Actually start the server
+
+  // GPIO configuration for ESP+relays modules that manage activation via GPIO (ej watering system at my department)
+    pinMode(0, OUTPUT); // 8266 Pin to the relay
+    digitalWrite(8, HIGH);    // Turn of 8266 relay
 }
 
 void loop() {
@@ -108,7 +125,33 @@ void loop() {
   webSocket.loop();
   server.handleClient(); // Listen for HTTP requests from clients
   //Main program
+  // For cases with several watering valves
+  // if (EstadoRiego[9] == '0' && EstadoRiego[13] == '0' && EstadoRiego[17] == '0' && EstadoRiego[21] == '0' && EstadoRiego[25] == '0')
+  if (EstadoRiego[9] == '0')
+  {
+    digitalWrite(8, HIGH);    // Turn of 8266 relay
+  }
+  // Turn on first valve (Should repeat for other watering valves, adding to turn off the rest in the if clause)
+  if (EstadoRiego[9] == '1')
+  {
+    digitalWrite(8, LOW);    // Turn on 8266 relay
+  }
+  // Verify timer safety check with MAXRIEGO variable (To turn off watering in case you forgot after MAXRIEGO seconds)
+  // for cases with several valves:
+  //if (EstadoRiego[9] == '1' || EstadoRiego[13] == '1' || EstadoRiego[17] == '1' || EstadoRiego[21] == '1' || EstadoRiego[25] == '1')
+  if (EstadoRiego[9] == '1')
+  {
 
+    if (now() > HoraEncendido + MAXRIEGO)
+    {
+      strcpy(EstadoRiego, "<#RIE#R1-0R2-0R3-0R4-0RT-0>");
+      if (logger) Serial.println(EstadoRiego);
+      webSocket.broadcastTXT(EstadoRiego);
+      if (logger)
+        Serial.println(F("APAGO RIEGOS - TIEMPO MAXIMO CUMPLIDO"));
+    }
+  }
+  rutinaProgramacion();
 }
 
 
@@ -303,18 +346,18 @@ void webSocketEvent(byte num, WStype_t type, byte *payload, size_t lenght)
     // }
     else if (payload[2] == 'R')
     {
-      if (EstadoRiego[25] == '0') // Solo si no esta prendido el tanque
-      {
-        Serial.printf("%s\n", payload);
-        if ((EstadoRiego[9] == '0' && EstadoRiego[13] == '0' && EstadoRiego[17] == '0' && EstadoRiego[21] == '0') && (payload[9] == '1' || payload[13] == '1' || payload[17] == '1' || payload[21] == '1'))
+              Serial.printf("%s\n", payload);
+        // In case there are several watering valves
+        //if ((EstadoRiego[9] == '0' && EstadoRiego[13] == '0' && EstadoRiego[17] == '0' && EstadoRiego[21] == '0') && (payload[9] == '1' || payload[13] == '1' || payload[17] == '1' || payload[21] == '1'))
+        if (EstadoRiego[9] == '0')
         {
-          // HoraEncendido = now();
+          HoraEncendido = now(); // Timer for the watering start, in order to check in main loop for the safety meassure
           if (logger)
             Serial.printf("Empieza el timer");
         }
         strcpy(EstadoRiego, (char *)payload);
         webSocket.broadcastTXT(payload);
-      }
+
     }
     else if (payload[2] == 'P')
     {
@@ -431,11 +474,11 @@ const char *LeerProgramacion(int riego)
     addr++;
   } //+6
 
-  if (logger)
-  {
-    Serial.printf("Programacion Riego %i:", riego);
-    Serial.println(Programacion);
-  }
+  // if (logger)
+  // {
+  //   Serial.printf("Programacion Riego %i:", riego);
+  //   Serial.println(Programacion);
+  // }
   return Programacion;
   // for debugging in order to push any time to test
   // switch (riego)
@@ -493,4 +536,87 @@ void GrabarProgramacion(char payload[39])
     } else {
       Serial.println("ERROR! EEPROM commit failed");
     }
+}
+
+void rutinaProgramacion()
+{
+    // USed only in case of a global enabled state, not used in this project
+  //EEPROM.get(0, Activado[6]);
+  // Serial.println(Activado[6]);
+  //if (Activado[6] == '1')
+  //{
+    int j=1;// Number of watering lines for the loop, in this project only one
+    int i;
+    for (i = 1; i <= j; i++)
+    {
+      // PRINCIPIO RUTINA PROGRAMACION RIEGO
+      LeerProgramacion(i); // LeerProgramacion stores the particular watering line values on to Programacion
+      // if (logger)
+      //   Serial.printf("Programacion Leida: %s", Programacion);
+      //char *Programacion = "<#PRG#R1E-1R1H-12:00R1T-05R1D-1234567>";
+      if (Programacion[10] == '1') // Watering Line enabled
+      {
+        if ((Programacion[weekday(now()) - 1 + 30] - 48) == weekday(now())) // if we are in an active day of the week for the program
+        {
+          char HoraRiego[3] = "00";
+          char MinutoRiego[3] = "00";
+          char RiegoDuracion[3] = "00";
+
+          uint8_t j = 0;
+          for (j = 0; j < 2; j++)
+          {
+            HoraRiego[j] = Programacion[j + 15];
+            MinutoRiego[j] = Programacion[j + 18];
+            RiegoDuracion[j] = Programacion[j + 24];
+          }
+          HoraRiego[2] = '\0';
+          MinutoRiego[2] = '\0';
+          RiegoDuracion[2] = '\0';
+
+          if (now() < tmConvert_t(year(now()), month(now()), day(now()), (byte)atoi(HoraRiego), (byte)atoi(MinutoRiego), 0) && RiegoP[i - 1] == '1')
+          {
+            RiegoP[i - 1] = '0'; //Changed day, turn the programed watering to 0
+          }
+          // Check if we reached a time to water for the particular line, and if it is enabled
+          if ((now() > tmConvert_t(year(now()), month(now()), day(now()), (byte)atoi(HoraRiego), (byte)atoi(MinutoRiego), 0)) && (now() < (atoi(RiegoDuracion) * 60) + tmConvert_t(year(now()), month(now()), day(now()), (byte)atoi(HoraRiego), (byte)atoi(MinutoRiego), 0)) && EstadoRiego[(i - 1) * 4 + 9] == '0' && RiegoP[i - 1] == '0')
+          {
+            if (logger)
+              Serial.printf("Enciendo Riego%i Hora de Regar", 1);
+
+            // ImprimirHora(t);
+            strcpy(EstadoRiego, "<#RIE#R1-0R2-0R3-0R4-0RT-0>");
+            EstadoRiego[(i - 1) * 4 + 9] = '1';
+            Serial.printf("%s\n", EstadoRiego);
+            webSocket.broadcastTXT(EstadoRiego);
+            HoraEncendido = now();
+          }
+          // Check if watering time has ended
+          if (now() > (atoi(RiegoDuracion) * 60) + tmConvert_t(year(now()), month(now()), day(now()), (byte)atoi(HoraRiego), (byte)atoi(MinutoRiego), 0) && RiegoP[i - 1] == '0')
+          {
+            if (logger)
+              Serial.printf("Apago Riego%i Hora de Regar", 1);
+
+            // ImprimirHora(t);
+            strcpy(EstadoRiego, "<#RIE#R1-0R2-0R3-0R4-0RT-0>");
+            Serial.printf("%s\n", EstadoRiego);
+            webSocket.broadcastTXT(EstadoRiego);
+            RiegoP[i - 1] = '1'; // Ya paso el Riego del Dia
+          }
+        }
+      }
+      // FIN RUTINA PROGRAMACION RIEGO
+    }
+  //}
+}
+
+time_t tmConvert_t(int YYYY, byte MM, byte DD, byte hh, byte mm, byte ss)
+{
+  tmElements_t tmSet;
+  tmSet.Year = YYYY - 1970;
+  tmSet.Month = MM;
+  tmSet.Day = DD;
+  tmSet.Hour = hh;
+  tmSet.Minute = mm;
+  tmSet.Second = ss;
+  return makeTime(tmSet); //convert to time_t
 }

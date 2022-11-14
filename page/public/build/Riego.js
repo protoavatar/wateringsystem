@@ -34,10 +34,10 @@ connection.onmessage = function (e) {
             document.getElementById("tiempo").value = Tiempo;
             if (parseInt(Hora.substr(0, 2)) > 12) {
                 document.getElementById("hora").value = (parseInt(Hora.substr(0, 2)) - 12).toString();
-                document.getElementById("ampm").value = "pm";
+                document.getElementById("ampm").value = "PM";
             } else {
                 document.getElementById("hora").value = (parseInt(Hora.substr(0, 2))).toString();
-                document.getElementById("ampm").value = "am";
+                document.getElementById("ampm").value = "AM";
             }
             document.getElementById("minutos").value = Hora.substr(3, 2);
 
@@ -61,10 +61,11 @@ document.getElementById("submit").addEventListener("click", function (event) {
     event.preventDefault();
     Tiempo = document.getElementById("tiempo").value;
     let ampm = document.getElementById("ampm").value;
-    if (ampm === "AM") {
-        Hora = document.getElementById("hora").value + ":" + document.getElementById("minutos").value;
-    } else {
+
+    if (ampm === "PM" && document.getElementById("hora").value !== "12" && document.getElementById("hora").value !== "00") {
         Hora = (parseInt(document.getElementById("hora").value) + 12).toString() + ":" + document.getElementById("minutos").value;
+    } else {
+        Hora = document.getElementById("hora").value + ":" + document.getElementById("minutos").value;
     }
     console.log("Hora: ", Hora);
     console.log("Tiempo: ", Tiempo);
