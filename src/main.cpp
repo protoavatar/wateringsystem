@@ -633,7 +633,7 @@ time_t tmConvert_t(int YYYY, byte MM, byte DD, byte hh, byte mm, byte ss)
   return makeTime(tmSet); //convert to time_t
 }
 
-// Send watering event to ntfy.sh... state can be 0 (OFF) or 1 (ON) coudl extend to notify several watering systems with and extra input variable
+// Send watering event to ntfy.sh... state can be 0 (OFF), 1 (ON) and the 2 for programing start and 3 for programming end coudl extend to notify several watering systems with and extra input variable
 void sendEvent(int state) {
   if ((WiFi.status() == WL_CONNECTED)) {
 
@@ -652,24 +652,17 @@ void sendEvent(int state) {
 	{
 		case 0:
 		httpCode = http.POST("El riego se ha apagado");
-			// httpCode = http.POST("{\"topic\":\"" HOST "\",\"message\":\"El riego se ha apagado\",\"title\":\"Evento de Riego\"}");
 			break;
 		case 1:
 		httpCode = http.POST("El riego se ha encendido");
-			// httpCode = http.POST("{\"topic\":\"" HOST "\",\"message\":\"El riego se ha encendido\",\"title\":\"Evento de Riego\"}");
 			break;
 		case 2:
 				httpCode = http.POST("Iniciando programacion");
-
-			// httpCode = http.POST("{\"topic\":\"" HOST "\",\"message\":\"Iniciando programacion\",\"title\":\"Evento de Riego\"}");
 			break;
 		case 3:
 		httpCode = http.POST("Finalizando programacion");
-			// httpCode = http.POST("{\"topic\":\"" HOST "\",\"message\":\"Finalizando programacion\",\"title\":\"Evento de Riego\"}");
 			break;
 	}
-
-    // int httpCode = http.POST("{\"hello\":\"world\"}");
 
     // httpCode will be negative on error
     if (httpCode > 0) {
