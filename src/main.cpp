@@ -7,6 +7,7 @@
 #include <ESP8266WebServer.h> // Include the WebServer library
 #include <WebSocketsServer.h> // Include to manage Websockets for web page communication to ESP
 #include <EEPROM.h>
+#include "ESP8266HTTPClient.h" // To manage the PUT requests for event notifications
 
 // -----------------------------------------------------------------------------
 // Constant Declarations
@@ -33,6 +34,7 @@ const char *LeerProgramacion(int addr); // Read Programing sent from page
 void GrabarProgramacion(char payload[39]); // Save Programming on memory
 void rutinaProgramacion(); // Watering programing routine
 time_t tmConvert_t(int YYYY, byte MM, byte DD, byte hh, byte mm, byte ss); // helper function to change from ASCII to time
+void sendEvent(int state); // Send Events to ntfy.sh
 // -----------------------------------------------------------------------------
 // Variable Declarations
 // -----------------------------------------------------------------------------
@@ -43,6 +45,7 @@ char CodigoEnvio[6] = "#RIE#";
 char *Programacion = "<#PRG#R1E-1R1H-12:00R1T-05R1D-1234567>";
 time_t HoraEncendido = now(); // store the current time in time variable t
 char RiegoP[5] = "1111"; // Variable to manage the day change with the programing (In this case example for 4 watering lines, only using the first one in this project)
+int state = 0;
 // Case used only when ESP (eg NodeMCU) uses several watering lines and what a general disabled state for all
 //char Activado[9] = "<#ACT#0>";
 
@@ -129,11 +132,20 @@ void loop() {
   // if (EstadoRiego[9] == '0' && EstadoRiego[13] == '0' && EstadoRiego[17] == '0' && EstadoRiego[21] == '0' && EstadoRiego[25] == '0')
   if (EstadoRiego[9] == '0')
   {
-    digitalWrite(8, HIGH);    // Turn of 8266 relay
+    if (state == 1) {
+			sendEvent(0);
+			state = 0;
+			}
+
+		digitalWrite(8, HIGH);    // Turn of 8266 relay
   }
   // Turn on first valve (Should repeat for other watering valves, adding to turn off the rest in the if clause)
   if (EstadoRiego[9] == '1')
   {
+		    if (state == 0) {
+			sendEvent(1);
+			state = 1;
+			}
     digitalWrite(8, LOW);    // Turn on 8266 relay
   }
   // Verify timer safety check with MAXRIEGO variable (To turn off watering in case you forgot after MAXRIEGO seconds)
@@ -349,7 +361,7 @@ void webSocketEvent(byte num, WStype_t type, byte *payload, size_t lenght)
               Serial.printf("%s\n", payload);
         // In case there are several watering valves
         //if ((EstadoRiego[9] == '0' && EstadoRiego[13] == '0' && EstadoRiego[17] == '0' && EstadoRiego[21] == '0') && (payload[9] == '1' || payload[13] == '1' || payload[17] == '1' || payload[21] == '1'))
-        if (EstadoRiego[9] == '0')
+        if (EstadoRiego[9] == '0' && payload[9] == '1')
         {
           HoraEncendido = now(); // Timer for the watering start, in order to check in main loop for the safety meassure
           if (logger)
@@ -582,7 +594,7 @@ void rutinaProgramacion()
           {
             if (logger)
               Serial.printf("Enciendo Riego%i Hora de Regar", 1);
-
+						sendEvent(2);
             // ImprimirHora(t);
             strcpy(EstadoRiego, "<#RIE#R1-0R2-0R3-0R4-0RT-0>");
             EstadoRiego[(i - 1) * 4 + 9] = '1';
@@ -595,7 +607,7 @@ void rutinaProgramacion()
           {
             if (logger)
               Serial.printf("Apago Riego%i Hora de Regar", 1);
-
+						sendEvent(3);
             // ImprimirHora(t);
             strcpy(EstadoRiego, "<#RIE#R1-0R2-0R3-0R4-0RT-0>");
             Serial.printf("%s\n", EstadoRiego);
@@ -619,4 +631,62 @@ time_t tmConvert_t(int YYYY, byte MM, byte DD, byte hh, byte mm, byte ss)
   tmSet.Minute = mm;
   tmSet.Second = ss;
   return makeTime(tmSet); //convert to time_t
+}
+
+// Send watering event to ntfy.sh... state can be 0 (OFF) or 1 (ON) coudl extend to notify several watering systems with and extra input variable
+void sendEvent(int state) {
+  if ((WiFi.status() == WL_CONNECTED)) {
+
+    WiFiClient client;
+    HTTPClient http;
+
+    Serial.print("[HTTP] begin...\n");
+    // configure traged server and url
+    http.begin(client, "http://ntfy.sh/" HOST); //HTTP
+    http.addHeader("Content-Type", "application/json");
+		http.addHeader("X-Title", "Evento de Riego");
+		int httpCode;
+    Serial.print("[HTTP] POST...\n");
+    // start connection and send HTTP header and body
+		switch(state)
+	{
+		case 0:
+		httpCode = http.POST("El riego se ha apagado");
+			// httpCode = http.POST("{\"topic\":\"" HOST "\",\"message\":\"El riego se ha apagado\",\"title\":\"Evento de Riego\"}");
+			break;
+		case 1:
+		httpCode = http.POST("El riego se ha encendido");
+			// httpCode = http.POST("{\"topic\":\"" HOST "\",\"message\":\"El riego se ha encendido\",\"title\":\"Evento de Riego\"}");
+			break;
+		case 2:
+				httpCode = http.POST("Iniciando programacion");
+
+			// httpCode = http.POST("{\"topic\":\"" HOST "\",\"message\":\"Iniciando programacion\",\"title\":\"Evento de Riego\"}");
+			break;
+		case 3:
+		httpCode = http.POST("Finalizando programacion");
+			// httpCode = http.POST("{\"topic\":\"" HOST "\",\"message\":\"Finalizando programacion\",\"title\":\"Evento de Riego\"}");
+			break;
+	}
+
+    // int httpCode = http.POST("{\"hello\":\"world\"}");
+
+    // httpCode will be negative on error
+    if (httpCode > 0) {
+      // HTTP header has been send and Server response header has been handled
+      Serial.printf("[HTTP] POST... code: %d\n", httpCode);
+
+      // file found at server
+      if (httpCode == HTTP_CODE_OK) {
+        const String& payload = http.getString();
+        Serial.println("received payload:\n<<");
+        Serial.println(payload);
+        Serial.println(">>");
+      }
+    } else {
+      Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
+    }
+
+    http.end();
+  }
 }
