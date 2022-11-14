@@ -1,6 +1,6 @@
 var Riego, Estado, Hora, Tiempo, Dias, Programacion;
 
-var connection = new WebSocket('ws://riegotest.local:81/', ['arduino']);
+var connection = new WebSocket('ws://balcon.local:81/', ['arduino']);
 // var connection = new WebSocket('ws://45.174.63.6:81/', ['arduino']);
 
 connection.onopen = function () {
@@ -36,7 +36,7 @@ connection.onmessage = function (e) {
                 document.getElementById("hora").value = (parseInt(Hora.substr(0, 2)) - 12).toString();
                 document.getElementById("ampm").value = "PM";
             } else {
-                document.getElementById("hora").value = (parseInt(Hora.substr(0, 2))).toString();
+                document.getElementById("hora").value = Hora.substr(0, 2);
                 document.getElementById("ampm").value = "AM";
             }
             document.getElementById("minutos").value = Hora.substr(3, 2);

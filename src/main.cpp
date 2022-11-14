@@ -8,13 +8,12 @@
 #include <WebSocketsServer.h> // Include to manage Websockets for web page communication to ESP
 #include <EEPROM.h>
 #include "ESP8266HTTPClient.h" // To manage the PUT requests for event notifications
+#include "secrets.h"
 
 // -----------------------------------------------------------------------------
 // Constant Declarations
 // -----------------------------------------------------------------------------
-#define WIFI_SSID "Jacobiano"  //Cambiar por tu WIFI SSID
-#define WIFI_PASS "galgogalgo"  //Cambiar por tu WIFI password
-#define HOST "RIEGOTEST"  //Cambiar por tu WIFI password
+
 #define SERIAL_BAUDRATE 9600
 #define MAXRIEGO 1800 // Safety meassure to turn off watering in case you forgot that you turned it on. In Seconds (This is 30 minutes: 1800s)
 
@@ -118,7 +117,7 @@ void setup() {
 
   // GPIO configuration for ESP+relays modules that manage activation via GPIO (ej watering system at my department)
     pinMode(0, OUTPUT); // 8266 Pin to the relay
-    digitalWrite(8, HIGH);    // Turn of 8266 relay
+    digitalWrite(0, HIGH);    // Turn of 8266 relay
 }
 
 void loop() {
@@ -137,7 +136,7 @@ void loop() {
 			state = 0;
 			}
 
-		digitalWrite(8, HIGH);    // Turn of 8266 relay
+		digitalWrite(0, HIGH);    // Turn of 8266 relay
   }
   // Turn on first valve (Should repeat for other watering valves, adding to turn off the rest in the if clause)
   if (EstadoRiego[9] == '1')
@@ -146,7 +145,7 @@ void loop() {
 			sendEvent(1);
 			state = 1;
 			}
-    digitalWrite(8, LOW);    // Turn on 8266 relay
+    digitalWrite(0, LOW);    // Turn on 8266 relay
   }
   // Verify timer safety check with MAXRIEGO variable (To turn off watering in case you forgot after MAXRIEGO seconds)
   // for cases with several valves:

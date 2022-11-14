@@ -3,7 +3,7 @@
 
 var EstadoRiego = "<#RIE#R1-0R2-0R3-0R4-0RT-0>"
 
-var connection = new WebSocket('ws://riegotest.local:81/', ['arduino']);
+var connection = new WebSocket('ws://balcon.local:81/', ['arduino']);
 // var connection = new WebSocket('ws://45.174.63.6:81/', ['arduino']);
 connection.onopen = function () {
     connection.send('Index');
@@ -24,12 +24,14 @@ connection.onmessage = function (e) {
                     element.classList.remove("hover:bg-green-600");
                     element.classList.add("bg-red-500");
                     element.classList.add("hover:bg-red-600");
+                    document.getElementById('boton').textContent = "Apagar";
                 }
                 else {
                     element.classList.remove("bg-red-500");
                     element.classList.remove("hover:bg-red-600");
                     element.classList.add("bg-green-500");
                     element.classList.add("hover:bg-green-600");
+                    document.getElementById('boton').textContent = "Encender";
                 }
             }
             break;
