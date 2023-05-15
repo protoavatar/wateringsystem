@@ -16,6 +16,7 @@
 
 #define SERIAL_BAUDRATE 9600
 #define MAXRIEGO 1800 // Safety meassure to turn off watering in case you forgot that you turned it on. In Seconds (This is 30 minutes: 1800s)
+uint8_t Riego_Pin = D1;
 
 // -----------------------------------------------------------------------------
 // Funtion Declarations
@@ -113,11 +114,22 @@ void setup() {
   });
   // EEPROM Initialization
   EEPROM.begin(61);
+// GrabarProgramacion("<#PRG#R1E-1R1H-18:00R1T-05R1D-1234567>");
   server.begin(); // Actually start the server
 
   // GPIO configuration for ESP+relays modules that manage activation via GPIO (ej watering system at my department)
-    pinMode(0, OUTPUT); // 8266 Pin to the relay
-    digitalWrite(0, HIGH);    // Turn of 8266 relay
+    pinMode(Riego_Pin, OUTPUT); // 8266 Pin to the relay
+    digitalWrite(Riego_Pin, HIGH);    // Turn of 8266 relay
+    int j=1;// Number of watering lines for the loop, in this project only one
+    int i;
+    for (i = 1; i <= j; i++)
+    {
+      // PRINCIPIO RUTINA PROGRAMACION RIEGO
+      LeerProgramacion(i); // LeerProgramacion stores the particular watering line values on to Programacion
+      if (logger)
+      Serial.printf("Programacion Leida: %s", Programacion);
+      //char *Programacion = "<#PRG#R1E-1R1H-12:00R1T-05R1D-1234567>";
+    }
 }
 
 void loop() {
@@ -136,7 +148,7 @@ void loop() {
 			state = 0;
 			}
 
-		digitalWrite(0, HIGH);    // Turn of 8266 relay
+		digitalWrite(Riego_Pin, HIGH);    // Turn of 8266 relay
   }
   // Turn on first valve (Should repeat for other watering valves, adding to turn off the rest in the if clause)
   if (EstadoRiego[9] == '1')
@@ -145,7 +157,7 @@ void loop() {
 			sendEvent(1);
 			state = 1;
 			}
-    digitalWrite(0, LOW);    // Turn on 8266 relay
+    digitalWrite(Riego_Pin, LOW);    // Turn on 8266 relay
   }
   // Verify timer safety check with MAXRIEGO variable (To turn off watering in case you forgot after MAXRIEGO seconds)
   // for cases with several valves:
@@ -173,21 +185,27 @@ void loop() {
 void wifiSetup() {
 
     // Set WIFI module to STA mode
-    WiFi.mode(WIFI_STA);
+    // WiFi.mode(WIFI_STA);
 
-    // Connect
-    Serial.printf("[WIFI] Connecting to %s ", WIFI_SSID);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    // Connect as Client
+    // Serial.printf("[WIFI] Connecting to %s ", WIFI_SSID);
+    // WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+    // Set WIFI module to SOFT_AP mode
+    WiFi.mode(WIFI_AP);
+
+    // Create SOFT_AP
+    WiFi.softAP(LOCAL_WIFI_SSID, LOCAL_WIFI_PASS);
 
     // Wait
-    while (WiFi.status() != WL_CONNECTED) {
-        Serial.print(".");
-        delay(100);
-    }
-    Serial.println();
+    // while (WiFi.status() != WL_CONNECTED) {
+    //     Serial.print(".");
+    //     delay(100);
+    // }
+    // Serial.println();
 
     // Connected!
-    Serial.printf("[WIFI] STATION Mode, SSID: %s, IP address: %s\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+    Serial.printf("[WIFI] SOFT AP Mode, SSID: %s, IP address: %s\n", WiFi.SSID().c_str(), WiFi.softAPIP().toString().c_str());
 
 }
 
@@ -515,7 +533,7 @@ void GrabarProgramacion(char payload[39])
 
   int j = 0;
   int addr = 15 * (payload[7] - 48 - 1) + 1;
-  Serial.println(addr);
+
   if (logger)
     Serial.printf("Direccion a guardar: %i", addr);
 
@@ -544,9 +562,15 @@ void GrabarProgramacion(char payload[39])
   } //+6
  if (EEPROM.commit()) {
       Serial.println("EEPROM successfully committed");
+      LeerProgramacion(payload[7] - 48);
+
     } else {
       Serial.println("ERROR! EEPROM commit failed");
     }
+    if (logger)
+  {
+    Serial.printf("Programacion Riego: %s", Programacion);
+  }
 }
 
 void rutinaProgramacion()
@@ -561,7 +585,7 @@ void rutinaProgramacion()
     for (i = 1; i <= j; i++)
     {
       // PRINCIPIO RUTINA PROGRAMACION RIEGO
-      LeerProgramacion(i); // LeerProgramacion stores the particular watering line values on to Programacion
+      //LeerProgramacion(i); // LeerProgramacion stores the particular watering line values on to Programacion
       // if (logger)
       //   Serial.printf("Programacion Leida: %s", Programacion);
       //char *Programacion = "<#PRG#R1E-1R1H-12:00R1T-05R1D-1234567>";
