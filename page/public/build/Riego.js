@@ -4,6 +4,7 @@ var connection = new WebSocket("ws://riego.local:81/", ["arduino"]);
 // var connection = new WebSocket('ws://45.174.63.6:81/', ['arduino']);
 
 connection.onopen = function () {
+	console.log("Connected...");
 	console.log(document.title);
 	connection.send(document.title);
 };

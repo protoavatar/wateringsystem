@@ -1,40 +1,39 @@
 #include <Arduino.h>
 #include "ESP8266WiFi.h"
-#include <WiFiUdp.h>          // Para el NTP
-#include <TimeLib.h>
 #include <ESP8266mDNS.h>      // Include the mDNS library
-#include "LittleFS.h"        // To manage the file system where to store the web pages
+#include "LittleFS.h"         // To manage the file system where to store the web pages
 #include <ESP8266WebServer.h> // Include the WebServer library
 #include <WebSocketsServer.h> // Include to manage Websockets for web page communication to ESP
 #include <EEPROM.h>
 #include "ESP8266HTTPClient.h" // To manage the PUT requests for event notifications
 #include "secrets.h"
+// Date and time functions using a DS3231 RTC connected via I2C and Wire lib
+#include "RTClib.h"
 
 // -----------------------------------------------------------------------------
 // Constant Declarations
 // -----------------------------------------------------------------------------
 
 #define SERIAL_BAUDRATE 9600
-#define MAXRIEGO 1800 // Safety meassure to turn off watering in case you forgot that you turned it on. In Seconds (This is 30 minutes: 1800s)
-uint8_t Riego_Pin = D1;
+#define MAXRIEGO 3600L // Safety meassure to turn off watering in case you forgot that you turned it on. In Seconds (This is 30 minutes: 1800s)
+uint8_t Riego_Pin = D0;
+
+RTC_DS3231 rtc;
 
 // -----------------------------------------------------------------------------
 // Funtion Declarations
 // -----------------------------------------------------------------------------
 void wifiSetup();
 void digitalClockDisplay();
-void sendNTPpacket(IPAddress &address);
-void configNTP();
 String getContentType(String filename); // convert the file extension to the MIME type
 bool handleFileRead(String path);       // send the right file to the client (if it exists)
-void handleRoot(); // function prototypes for HTTP handlers
+void handleRoot();                      // function prototypes for HTTP handlers
 void handleNotFound();
 void configWebSocket();
-const char *LeerProgramacion(int addr); // Read Programing sent from page
+const char *LeerProgramacion(int addr);    // Read Programing sent from page
 void GrabarProgramacion(char payload[39]); // Save Programming on memory
-void rutinaProgramacion(); // Watering programing routine
-time_t tmConvert_t(int YYYY, byte MM, byte DD, byte hh, byte mm, byte ss); // helper function to change from ASCII to time
-void sendEvent(int state); // Send Events to ntfy.sh
+void rutinaProgramacion();                 // Watering programing routine
+// void sendEvent(int state);                 // Send Events to ntfy.sh
 // -----------------------------------------------------------------------------
 // Variable Declarations
 // -----------------------------------------------------------------------------
@@ -43,30 +42,11 @@ boolean logger = true;
 char EstadoRiego[28] = "<#RIE#R1-0R2-0R3-0R4-0RT-0>";
 char CodigoEnvio[6] = "#RIE#";
 char *Programacion = "<#PRG#R1E-1R1H-12:00R1T-05R1D-1234567>";
-time_t HoraEncendido = now(); // store the current time in time variable t
-char RiegoP[5] = "1111"; // Variable to manage the day change with the programing (In this case example for 4 watering lines, only using the first one in this project)
+DateTime HoraEncendido = DateTime(); // store the current time in time variable t
+char RiegoP[5] = "1111";             // Variable to manage the day change with the programing (In this case example for 4 watering lines, only using the first one in this project)
 int state = 0;
 // Case used only when ESP (eg NodeMCU) uses several watering lines and what a general disabled state for all
-//char Activado[9] = "<#ACT#0>";
-
-// -----------------------------------------------------------------------------
-// NTP declarations
-// -----------------------------------------------------------------------------
-// NTP Servers:
-static const char ntpServerName[] = "us.pool.ntp.org";
-//static const char ntpServerName[] = "time.nist.gov";
-//static const char ntpServerName[] = "time-a.timefreq.bldrdoc.gov";
-//static const char ntpServerName[] = "time-b.timefreq.bldrdoc.gov";
-//static const char ntpServerName[] = "time-c.timefreq.bldrdoc.gov";
-
-const int timeZone = -3; // Central European Time
-
-boolean ntp = false;
-
-WiFiUDP Udp;
-unsigned int localPort = 8888; // local port to listen for UDP packets
-
-time_t getNtpTime();
+// char Activado[9] = "<#ACT#0>";
 
 // -----------------------------------------------------------------------------
 // WebServer declarations
@@ -78,22 +58,40 @@ WebSocketsServer webSocket(81); // create a websocket server on port 81
 // Pinout configuration for relays
 // -----------------------------------------------------------------------------
 // For ESP+Relay modules that manage the relay via the serial port (Instead of GPIO), in my case this happened for a lighting system (Not this project)
-//byte relON[] = {0xA0, 0x01, 0x01, 0xA2};  //Hex command to send to onboard serial microprocessor for open relay
-//byte relOFF[] = {0xA0, 0x01, 0x00, 0xA1}; //Hex command to send to serial for close relay
+// byte relON[] = {0xA0, 0x01, 0x01, 0xA2};  //Hex command to send to onboard serial microprocessor for open relay
+// byte relOFF[] = {0xA0, 0x01, 0x00, 0xA1}; //Hex command to send to serial for close relay
 // For ESP+Relay modules that manage the relay via GPIO port, see below in setup
 
-
-void setup() {
+void setup()
+{
   // put your setup code here, to run once:
   Serial.begin(SERIAL_BAUDRATE);
 
-    // Wifi
-    wifiSetup();
-    //NTP
-    configNTP();
-    digitalClockDisplay();
-    //mDNS
-      if (MDNS.begin(HOST))
+  // Wifi
+  wifiSetup();
+  // RTC
+  if (!rtc.begin())
+  {
+    Serial.println("Couldn't find RTC");
+    Serial.flush();
+    while (1)
+      delay(10);
+  }
+  if (rtc.lostPower())
+  {
+    Serial.println("RTC lost power, let's set the time!");
+    // When time needs to be set on a new device, or after a power loss, the
+    // following line sets the RTC to the date & time this sketch was compiled
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    // This line sets the RTC with an explicit date & time, for example to set
+    // January 21, 2014 at 3am you would call:
+    // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+  }
+  //  configNTP();
+  HoraEncendido = rtc.now();
+  digitalClockDisplay();
+  // mDNS
+  if (MDNS.begin(HOST))
   { // Start the mDNS responder for esp8266.local
     if (logger)
       Serial.println("mDNS responder started");
@@ -104,71 +102,75 @@ void setup() {
       Serial.println("Error setting up MDNS responder!");
   }
   // LittleFS
-    LittleFS.begin(); // Start the SPI Flash Files System
-  // Websockets
-   configWebSocket(); // Start a WebSocket server
-   // Web Server
-      server.onNotFound([]() {                              // If the client requests any URI
+  LittleFS.begin();                                     // Start the SPI Flash Files System
+                                                        // Websockets
+  configWebSocket();                                    // Start a WebSocket server
+                                                        // Web Server
+  server.onNotFound([]() {                              // If the client requests any URI
     if (!handleFileRead(server.uri()))                  // send it if it exists
       server.send(404, "text/plain", "404: Not Found"); // otherwise, respond with a 404 (Not Found) error
   });
   // EEPROM Initialization
   EEPROM.begin(61);
-// GrabarProgramacion("<#PRG#R1E-1R1H-18:00R1T-05R1D-1234567>");
+  // GrabarProgramacion("<#PRG#R1E-1R1H-18:00R1T-05R1D-1234567>");
   server.begin(); // Actually start the server
 
   // GPIO configuration for ESP+relays modules that manage activation via GPIO (ej watering system at my department)
-    pinMode(Riego_Pin, OUTPUT); // 8266 Pin to the relay
-    digitalWrite(Riego_Pin, HIGH);    // Turn of 8266 relay
-    int j=1;// Number of watering lines for the loop, in this project only one
-    int i;
-    for (i = 1; i <= j; i++)
-    {
-      // PRINCIPIO RUTINA PROGRAMACION RIEGO
-      LeerProgramacion(i); // LeerProgramacion stores the particular watering line values on to Programacion
-      if (logger)
+  pinMode(Riego_Pin, OUTPUT);   // 8266 Pin to the relay
+  digitalWrite(Riego_Pin, LOW); // Turn of 8266 relay
+  int j = 1;                    // Number of watering lines for the loop, in this project only one
+  int i;
+  for (i = 1; i <= j; i++)
+  {
+    // PRINCIPIO RUTINA PROGRAMACION RIEGO
+    LeerProgramacion(i); // LeerProgramacion stores the particular watering line values on to Programacion
+    if (logger)
       Serial.printf("Programacion Leida: %s", Programacion);
-      //char *Programacion = "<#PRG#R1E-1R1H-12:00R1T-05R1D-1234567>";
-    }
+    // char *Programacion = "<#PRG#R1E-1R1H-12:00R1T-05R1D-1234567>";
+  }
 }
 
-void loop() {
+void loop()
+{
   // put your main code here, to run repeatedly:
-  //mDNS
+  // mDNS
   MDNS.update();
   webSocket.loop();
   server.handleClient(); // Listen for HTTP requests from clients
-  //Main program
-  // For cases with several watering valves
-  // if (EstadoRiego[9] == '0' && EstadoRiego[13] == '0' && EstadoRiego[17] == '0' && EstadoRiego[21] == '0' && EstadoRiego[25] == '0')
+  // Main program
+  //  For cases with several watering valves
+  //  if (EstadoRiego[9] == '0' && EstadoRiego[13] == '0' && EstadoRiego[17] == '0' && EstadoRiego[21] == '0' && EstadoRiego[25] == '0')
   if (EstadoRiego[9] == '0')
   {
-    if (state == 1) {
-			sendEvent(0);
-			state = 0;
-			}
+    if (state == 1)
+    {
+      // sendEvent(0);
+      state = 0;
+    }
 
-		digitalWrite(Riego_Pin, HIGH);    // Turn of 8266 relay
+    digitalWrite(Riego_Pin, LOW); // Turn of 8266 relay
   }
   // Turn on first valve (Should repeat for other watering valves, adding to turn off the rest in the if clause)
   if (EstadoRiego[9] == '1')
   {
-		    if (state == 0) {
-			sendEvent(1);
-			state = 1;
-			}
-    digitalWrite(Riego_Pin, LOW);    // Turn on 8266 relay
+    if (state == 0)
+    {
+      // sendEvent(1);
+      state = 1;
+    }
+    digitalWrite(Riego_Pin, HIGH); // Turn on 8266 relay
   }
   // Verify timer safety check with MAXRIEGO variable (To turn off watering in case you forgot after MAXRIEGO seconds)
   // for cases with several valves:
-  //if (EstadoRiego[9] == '1' || EstadoRiego[13] == '1' || EstadoRiego[17] == '1' || EstadoRiego[21] == '1' || EstadoRiego[25] == '1')
+  // if (EstadoRiego[9] == '1' || EstadoRiego[13] == '1' || EstadoRiego[17] == '1' || EstadoRiego[21] == '1' || EstadoRiego[25] == '1')
   if (EstadoRiego[9] == '1')
   {
 
-    if (now() > HoraEncendido + MAXRIEGO)
+    if (rtc.now() > HoraEncendido + MAXRIEGO)
     {
       strcpy(EstadoRiego, "<#RIE#R1-0R2-0R3-0R4-0RT-0>");
-      if (logger) Serial.println(EstadoRiego);
+      if (logger)
+        Serial.println(EstadoRiego);
       webSocket.broadcastTXT(EstadoRiego);
       if (logger)
         Serial.println(F("APAGO RIEGOS - TIEMPO MAXIMO CUMPLIDO"));
@@ -177,126 +179,35 @@ void loop() {
   rutinaProgramacion();
 }
 
-
 // -----------------------------------------------------------------------------
 // Wifi
 // -----------------------------------------------------------------------------
 
-void wifiSetup() {
-
-    // Set WIFI module to STA mode
-    // WiFi.mode(WIFI_STA);
-
-    // Connect as Client
-    // Serial.printf("[WIFI] Connecting to %s ", WIFI_SSID);
-    // WiFi.begin(WIFI_SSID, WIFI_PASS);
-
-    // Set WIFI module to SOFT_AP mode
-    WiFi.mode(WIFI_AP);
-
-    // Create SOFT_AP
-    WiFi.softAP(LOCAL_WIFI_SSID, LOCAL_WIFI_PASS);
-
-    // Wait
-    // while (WiFi.status() != WL_CONNECTED) {
-    //     Serial.print(".");
-    //     delay(100);
-    // }
-    // Serial.println();
-
-    // Connected!
-    Serial.printf("[WIFI] SOFT AP Mode, SSID: %s, IP address: %s\n", WiFi.SSID().c_str(), WiFi.softAPIP().toString().c_str());
-
-}
-
-
-// -----------------------------------------------------------------------------
-// NTP
-// -----------------------------------------------------------------------------
-void configNTP()
+void wifiSetup()
 {
-  if (logger)
-    Serial.println("Starting UDP");
-  Udp.begin(localPort);
-  if (logger)
-    Serial.print("Local port: ");
-  if (logger)
-    Serial.println(Udp.localPort());
-  if (logger)
-    Serial.println("waiting for sync");
-  setSyncProvider(getNtpTime);
-  setSyncInterval(3600);
-}
 
+  // Set WIFI module to STA mode
+  // WiFi.mode(WIFI_STA);
 
+  // Connect as Client
+  // Serial.printf("[WIFI] Connecting to %s ", WIFI_SSID);
+  // WiFi.begin(WIFI_SSID, WIFI_PASS);
 
-/*-------- NTP code ----------*/
+  // Set WIFI module to SOFT_AP mode
+  WiFi.mode(WIFI_AP);
 
-const int NTP_PACKET_SIZE = 48;     // NTP time is in the first 48 bytes of message
-byte packetBuffer[NTP_PACKET_SIZE]; //buffer to hold incoming & outgoing packets
+  // Create SOFT_AP
+  WiFi.softAP(LOCAL_WIFI_SSID, LOCAL_WIFI_PASS);
 
-time_t getNtpTime()
-{
-  IPAddress ntpServerIP; // NTP server's ip address
+  // Wait
+  // while (WiFi.status() != WL_CONNECTED) {
+  //     Serial.print(".");
+  //     delay(100);
+  // }
+  // Serial.println();
 
-  while (Udp.parsePacket() > 0)
-    ; // discard any previously received packets
-  if (logger)
-    Serial.println("Transmit NTP Request");
-  // get a random server from the pool
-  WiFi.hostByName(ntpServerName, ntpServerIP);
-  if (logger)
-    Serial.print(ntpServerName);
-  if (logger)
-    Serial.print(": ");
-  if (logger)
-    Serial.println(ntpServerIP);
-  sendNTPpacket(ntpServerIP);
-  uint32_t beginWait = millis();
-  while (millis() - beginWait < 1500)
-  {
-    int size = Udp.parsePacket();
-    if (size >= NTP_PACKET_SIZE)
-    {
-      if (logger)
-        Serial.println("Receive NTP Response");
-      ntp = true;
-      Udp.read(packetBuffer, NTP_PACKET_SIZE); // read packet into the buffer
-      unsigned long secsSince1900;
-      // convert four bytes starting at location 40 to a long integer
-      secsSince1900 = (unsigned long)packetBuffer[40] << 24;
-      secsSince1900 |= (unsigned long)packetBuffer[41] << 16;
-      secsSince1900 |= (unsigned long)packetBuffer[42] << 8;
-      secsSince1900 |= (unsigned long)packetBuffer[43];
-      return secsSince1900 - 2208988800UL + timeZone * SECS_PER_HOUR;
-    }
-  }
-  if (logger)
-    Serial.println("No NTP Response :-(");
-  return 0; // return 0 if unable to get the time
-}
-
-// send an NTP request to the time server at the given address
-void sendNTPpacket(IPAddress &address)
-{
-  // set all bytes in the buffer to 0
-  memset(packetBuffer, 0, NTP_PACKET_SIZE);
-  // Initialize values needed to form NTP request
-  // (see URL above for details on the packets)
-  packetBuffer[0] = 0b11100011; // LI, Version, Mode
-  packetBuffer[1] = 0;          // Stratum, or type of clock
-  packetBuffer[2] = 6;          // Polling Interval
-  packetBuffer[3] = 0xEC;       // Peer Clock Precision
-  // 8 bytes of zero for Root Delay & Root Dispersion
-  packetBuffer[12] = 49;
-  packetBuffer[13] = 0x4E;
-  packetBuffer[14] = 49;
-  packetBuffer[15] = 52;
-  // all NTP fields have been given values, now
-  // you can send a packet requesting a timestamp:
-  Udp.beginPacket(address, 123); //NTP requests are to port 123
-  Udp.write(packetBuffer, NTP_PACKET_SIZE);
-  Udp.endPacket();
+  // Connected!
+  Serial.printf("[WIFI] SOFT AP Mode, SSID: %s, IP address: %s\n", WiFi.SSID().c_str(), WiFi.softAPIP().toString().c_str());
 }
 
 void printDigits(int digits)
@@ -307,17 +218,19 @@ void printDigits(int digits)
   Serial.print(digits);
 }
 
-void digitalClockDisplay(){
+void digitalClockDisplay()
+{
+  DateTime now = rtc.now();
   // digital clock display of the time
-  Serial.print(hour());
-  printDigits(minute());
-  printDigits(second());
+  Serial.print(now.hour());
+  printDigits(now.minute());
+  printDigits(now.second());
   Serial.print(" ");
-  Serial.print(day());
+  Serial.print(now.day());
   Serial.print(" ");
-  Serial.print(month());
+  Serial.print(now.month());
   Serial.print(" ");
-  Serial.print(year());
+  Serial.print(now.year());
   Serial.println();
 }
 
@@ -347,14 +260,6 @@ void webSocketEvent(byte num, WStype_t type, byte *payload, size_t lenght)
       // EEPROM.get(0, Activado[6]);
       // // Serial.println(Activado[6]);
       // webSocket.broadcastTXT(Activado);
-      if (timeStatus() != timeNotSet)
-      {
-        webSocket.broadcastTXT("<#NTP#Sincronizado#>");
-      }
-      else
-      {
-        webSocket.broadcastTXT("<#NTP#NOsincronizado#>");
-      }
     }
     else if (strcmp((char *)payload, "Riego1") == 0)
     {
@@ -375,22 +280,39 @@ void webSocketEvent(byte num, WStype_t type, byte *payload, size_t lenght)
     // }
     else if (payload[2] == 'R')
     {
-              Serial.printf("%s\n", payload);
-        // In case there are several watering valves
-        //if ((EstadoRiego[9] == '0' && EstadoRiego[13] == '0' && EstadoRiego[17] == '0' && EstadoRiego[21] == '0') && (payload[9] == '1' || payload[13] == '1' || payload[17] == '1' || payload[21] == '1'))
-        if (EstadoRiego[9] == '0' && payload[9] == '1')
-        {
-          HoraEncendido = now(); // Timer for the watering start, in order to check in main loop for the safety meassure
-          if (logger)
-            Serial.printf("Empieza el timer");
-        }
-        strcpy(EstadoRiego, (char *)payload);
-        webSocket.broadcastTXT(payload);
-
+      Serial.printf("%s\n", payload);
+      // In case there are several watering valves
+      // if ((EstadoRiego[9] == '0' && EstadoRiego[13] == '0' && EstadoRiego[17] == '0' && EstadoRiego[21] == '0') && (payload[9] == '1' || payload[13] == '1' || payload[17] == '1' || payload[21] == '1'))
+      if (EstadoRiego[9] == '0' && payload[9] == '1')
+      {
+        HoraEncendido = rtc.now(); // Timer for the watering start, in order to check in main loop for the safety meassure
+        if (logger)
+          Serial.printf("Empieza el timer");
+      }
+      strcpy(EstadoRiego, (char *)payload);
+      webSocket.broadcastTXT(payload);
     }
     else if (payload[2] == 'P')
     {
       GrabarProgramacion((char *)payload);
+    }
+    else if (payload[2] == 'T')
+    {
+      // Ajust time from connected browser
+      // <#TIM#20230516140241#>
+      if (logger)
+        Serial.printf("Hora a configurar: %s\n", payload);
+      u_int16_t year_num = (payload[6] - '0') * 1000 + (payload[7] - '0') * 100 + (payload[8] - '0') * 10 + (payload[9] - '0');
+      u_int8_t month_num = (payload[10] - '0') * 10 + (payload[11] - '0');
+      u_int8_t day_num = (payload[12] - '0') * 10 + (payload[13] - '0');
+      u_int8_t hour_num = (payload[14] - '0') * 10 + (payload[15] - '0');
+      u_int8_t minute_num = (payload[16] - '0') * 10 + (payload[17] - '0');
+      u_int8_t second_num = (payload[18] - '0') * 10 + (payload[19] - '0');
+      if (logger)
+        Serial.printf("%d-%d-%d %d:%d:%d\n", year_num, month_num, day_num, hour_num, minute_num, second_num);
+      rtc.adjust(DateTime(year_num, month_num, day_num, hour_num, minute_num, second_num));
+
+      digitalClockDisplay();
     }
     break;
     // Case used only when ESP (eg NodeMCU) uses several watering lines and what a general disabled state for all
@@ -416,8 +338,7 @@ void webSocketEvent(byte num, WStype_t type, byte *payload, size_t lenght)
     // }
 
     // break;
-
-}
+  }
 }
 
 void configWebSocket()
@@ -479,7 +400,7 @@ const char *LeerProgramacion(int riego)
   Programacion[7] = riego + 48;
   EEPROM.get(addr, Programacion[10]);
   addr++;
-  //Riego1Hora [6] = "12:00";
+  // Riego1Hora [6] = "12:00";
   Programacion[12] = riego + 48;
   for (j = 0; j < 5; j++)
   {
@@ -487,7 +408,7 @@ const char *LeerProgramacion(int riego)
     addr++;
   }
 
-  //Riego1Duracion [3] = "05";
+  // Riego1Duracion [3] = "05";
   Programacion[21] = riego + 48;
   for (j = 0; j < 2; j++)
   {
@@ -495,7 +416,7 @@ const char *LeerProgramacion(int riego)
     addr++;
   } //+9
 
-  //Riego1Dias[8] = "0000000";
+  // Riego1Dias[8] = "0000000";
   Programacion[27] = riego + 48;
   for (j = 0; j < 7; j++)
   {
@@ -539,7 +460,7 @@ void GrabarProgramacion(char payload[39])
 
   EEPROM.put(addr, payload[10]);
   addr++;
-  //RiegoHora [6] = "12:00";
+  // RiegoHora [6] = "12:00";
 
   for (j = 0; j < 5; j++)
   {
@@ -547,27 +468,29 @@ void GrabarProgramacion(char payload[39])
     addr++;
   }
 
-  //RiegoDuracion [3] = "05";
+  // RiegoDuracion [3] = "05";
   for (j = 0; j < 2; j++)
   {
     EEPROM.put(addr, payload[24 + j]);
     addr++;
   } //+9
 
-  //RiegoDias[8] = "0000000";
+  // RiegoDias[8] = "0000000";
   for (j = 0; j < 7; j++)
   {
     EEPROM.put(addr, payload[30 + j]);
     addr++;
   } //+6
- if (EEPROM.commit()) {
-      Serial.println("EEPROM successfully committed");
-      LeerProgramacion(payload[7] - 48);
-
-    } else {
-      Serial.println("ERROR! EEPROM commit failed");
-    }
-    if (logger)
+  if (EEPROM.commit())
+  {
+    Serial.println("EEPROM successfully committed");
+    LeerProgramacion(payload[7] - 48);
+  }
+  else
+  {
+    Serial.println("ERROR! EEPROM commit failed");
+  }
+  if (logger)
   {
     Serial.printf("Programacion Riego: %s", Programacion);
   }
@@ -575,134 +498,131 @@ void GrabarProgramacion(char payload[39])
 
 void rutinaProgramacion()
 {
-    // USed only in case of a global enabled state, not used in this project
-  //EEPROM.get(0, Activado[6]);
-  // Serial.println(Activado[6]);
-  //if (Activado[6] == '1')
+  DateTime datetime = rtc.now();
+  // USed only in case of a global enabled state, not used in this project
+  // EEPROM.get(0, Activado[6]);
+  //  Serial.println(Activado[6]);
+  // if (Activado[6] == '1')
   //{
-    int j=1;// Number of watering lines for the loop, in this project only one
-    int i;
-    for (i = 1; i <= j; i++)
+  int j = 1; // Number of watering lines for the loop, in this project only one
+  int i;
+  for (i = 1; i <= j; i++)
+  {
+    // PRINCIPIO RUTINA PROGRAMACION RIEGO
+    // LeerProgramacion(i); // LeerProgramacion stores the particular watering line values on to Programacion
+    // if (logger)
+    //   Serial.printf("Programacion Leida: %s", Programacion);
+    // char *Programacion = "<#PRG#R1E-1R1H-12:00R1T-05R1D-1234567>";
+    if (Programacion[10] == '1') // Watering Line enabled
     {
-      // PRINCIPIO RUTINA PROGRAMACION RIEGO
-      //LeerProgramacion(i); // LeerProgramacion stores the particular watering line values on to Programacion
-      // if (logger)
-      //   Serial.printf("Programacion Leida: %s", Programacion);
-      //char *Programacion = "<#PRG#R1E-1R1H-12:00R1T-05R1D-1234567>";
-      if (Programacion[10] == '1') // Watering Line enabled
+      if ((Programacion[datetime.dayOfTheWeek() + 30] - 48) == datetime.dayOfTheWeek() + 1) // if we are in an active day of the week for the program
       {
-        if ((Programacion[weekday(now()) - 1 + 30] - 48) == weekday(now())) // if we are in an active day of the week for the program
+        char HoraRiego[3] = "00";
+        char MinutoRiego[3] = "00";
+        char RiegoDuracion[3] = "00";
+
+        uint8_t j = 0;
+        for (j = 0; j < 2; j++)
         {
-          char HoraRiego[3] = "00";
-          char MinutoRiego[3] = "00";
-          char RiegoDuracion[3] = "00";
+          HoraRiego[j] = Programacion[j + 15];
+          MinutoRiego[j] = Programacion[j + 18];
+          RiegoDuracion[j] = Programacion[j + 24];
+        }
+        HoraRiego[2] = '\0';
+        MinutoRiego[2] = '\0';
+        RiegoDuracion[2] = '\0';
 
-          uint8_t j = 0;
-          for (j = 0; j < 2; j++)
-          {
-            HoraRiego[j] = Programacion[j + 15];
-            MinutoRiego[j] = Programacion[j + 18];
-            RiegoDuracion[j] = Programacion[j + 24];
-          }
-          HoraRiego[2] = '\0';
-          MinutoRiego[2] = '\0';
-          RiegoDuracion[2] = '\0';
+        DateTime horariego = DateTime(datetime.year(), datetime.month(), datetime.day(), (byte)atoi(HoraRiego), (byte)atoi(MinutoRiego), 0);
 
-          if (now() < tmConvert_t(year(now()), month(now()), day(now()), (byte)atoi(HoraRiego), (byte)atoi(MinutoRiego), 0) && RiegoP[i - 1] == '1')
-          {
-            RiegoP[i - 1] = '0'; //Changed day, turn the programed watering to 0
-          }
-          // Check if we reached a time to water for the particular line, and if it is enabled
-          if ((now() > tmConvert_t(year(now()), month(now()), day(now()), (byte)atoi(HoraRiego), (byte)atoi(MinutoRiego), 0)) && (now() < (atoi(RiegoDuracion) * 60) + tmConvert_t(year(now()), month(now()), day(now()), (byte)atoi(HoraRiego), (byte)atoi(MinutoRiego), 0)) && EstadoRiego[(i - 1) * 4 + 9] == '0' && RiegoP[i - 1] == '0')
-          {
-            if (logger)
-              Serial.printf("Enciendo Riego%i Hora de Regar", 1);
-						sendEvent(2);
-            // ImprimirHora(t);
-            strcpy(EstadoRiego, "<#RIE#R1-0R2-0R3-0R4-0RT-0>");
-            EstadoRiego[(i - 1) * 4 + 9] = '1';
-            Serial.printf("%s\n", EstadoRiego);
-            webSocket.broadcastTXT(EstadoRiego);
-            HoraEncendido = now();
-          }
-          // Check if watering time has ended
-          if (now() > (atoi(RiegoDuracion) * 60) + tmConvert_t(year(now()), month(now()), day(now()), (byte)atoi(HoraRiego), (byte)atoi(MinutoRiego), 0) && RiegoP[i - 1] == '0')
-          {
-            if (logger)
-              Serial.printf("Apago Riego%i Hora de Regar", 1);
-						sendEvent(3);
-            // ImprimirHora(t);
-            strcpy(EstadoRiego, "<#RIE#R1-0R2-0R3-0R4-0RT-0>");
-            Serial.printf("%s\n", EstadoRiego);
-            webSocket.broadcastTXT(EstadoRiego);
-            RiegoP[i - 1] = '1'; // Ya paso el Riego del Dia
-          }
+        if (datetime < horariego && RiegoP[i - 1] == '1')
+        {
+          RiegoP[i - 1] = '0'; // Changed day, turn the programed watering to 0
+        }
+        // Check if we reached a time to water for the particular line, and if it is enabled
+        if (datetime > horariego && (datetime < horariego + TimeSpan(atoi(RiegoDuracion) * 60)) && EstadoRiego[(i - 1) * 4 + 9] == '0' && RiegoP[i - 1] == '0')
+        {
+          if (logger)
+            Serial.printf("Enciendo Riego%i Hora de Regar", 1);
+          // sendEvent(2);
+          // ImprimirHora(t);
+          strcpy(EstadoRiego, "<#RIE#R1-0R2-0R3-0R4-0RT-0>");
+          EstadoRiego[(i - 1) * 4 + 9] = '1';
+          Serial.printf("%s\n", EstadoRiego);
+          webSocket.broadcastTXT(EstadoRiego);
+          HoraEncendido = datetime;
+        }
+        // Check if watering time has ended
+        if (datetime > horariego + TimeSpan(atoi(RiegoDuracion) * 60) && RiegoP[i - 1] == '0')
+        {
+          if (logger)
+            Serial.printf("Apago Riego%i Hora de Regar", 1);
+          // sendEvent(3);
+          // ImprimirHora(t);
+          strcpy(EstadoRiego, "<#RIE#R1-0R2-0R3-0R4-0RT-0>");
+          Serial.printf("%s\n", EstadoRiego);
+          webSocket.broadcastTXT(EstadoRiego);
+          RiegoP[i - 1] = '1'; // Ya paso el Riego del Dia
         }
       }
-      // FIN RUTINA PROGRAMACION RIEGO
     }
+    // FIN RUTINA PROGRAMACION RIEGO
+  }
   //}
 }
 
-time_t tmConvert_t(int YYYY, byte MM, byte DD, byte hh, byte mm, byte ss)
-{
-  tmElements_t tmSet;
-  tmSet.Year = YYYY - 1970;
-  tmSet.Month = MM;
-  tmSet.Day = DD;
-  tmSet.Hour = hh;
-  tmSet.Minute = mm;
-  tmSet.Second = ss;
-  return makeTime(tmSet); //convert to time_t
-}
-
 // Send watering event to ntfy.sh... state can be 0 (OFF), 1 (ON) and the 2 for programing start and 3 for programming end coudl extend to notify several watering systems with and extra input variable
-void sendEvent(int state) {
-  if ((WiFi.status() == WL_CONNECTED)) {
+// void sendEvent(int state)
+// {
+//   if ((WiFi.status() == WL_CONNECTED))
+//   {
 
-    WiFiClient client;
-    HTTPClient http;
+//     WiFiClient client;
+//     HTTPClient http;
 
-    Serial.print("[HTTP] begin...\n");
-    // configure traged server and url
-    http.begin(client, "http://ntfy.sh/" HOST); //HTTP
-    http.addHeader("Content-Type", "application/json");
-		http.addHeader("X-Title", "Evento de Riego");
-		int httpCode;
-    Serial.print("[HTTP] POST...\n");
-    // start connection and send HTTP header and body
-		switch(state)
-	{
-		case 0:
-		httpCode = http.POST("El riego se ha apagado");
-			break;
-		case 1:
-		httpCode = http.POST("El riego se ha encendido");
-			break;
-		case 2:
-				httpCode = http.POST("Iniciando programacion");
-			break;
-		case 3:
-		httpCode = http.POST("Finalizando programacion");
-			break;
-	}
+//     Serial.print("[HTTP] begin...\n");
+//     // configure traged server and url
+//     http.begin(client, "http://ntfy.sh/" HOST); // HTTP
+//     http.addHeader("Content-Type", "application/json");
+//     http.addHeader("X-Title", "Evento de Riego");
+//     int httpCode;
+//     Serial.print("[HTTP] POST...\n");
+//     // start connection and send HTTP header and body
+//     switch (state)
+//     {
+//     case 0:
+//       httpCode = http.POST("El riego se ha apagado");
+//       break;
+//     case 1:
+//       httpCode = http.POST("El riego se ha encendido");
+//       break;
+//     case 2:
+//       httpCode = http.POST("Iniciando programacion");
+//       break;
+//     case 3:
+//       httpCode = http.POST("Finalizando programacion");
+//       break;
+//     }
 
-    // httpCode will be negative on error
-    if (httpCode > 0) {
-      // HTTP header has been send and Server response header has been handled
-      Serial.printf("[HTTP] POST... code: %d\n", httpCode);
+//     // httpCode will be negative on error
+//     if (httpCode > 0)
+//     {
+//       // HTTP header has been send and Server response header has been handled
+//       Serial.printf("[HTTP] POST... code: %d\n", httpCode);
 
-      // file found at server
-      if (httpCode == HTTP_CODE_OK) {
-        const String& payload = http.getString();
-        Serial.println("received payload:\n<<");
-        Serial.println(payload);
-        Serial.println(">>");
-      }
-    } else {
-      Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
-    }
+//       // file found at server
+//       if (httpCode == HTTP_CODE_OK)
+//       {
+//         const String &payload = http.getString();
+//         Serial.println("received payload:\n<<");
+//         Serial.println(payload);
+//         Serial.println(">>");
+//       }
+//     }
+//     else
+//     {
+//       Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
+//     }
 
-    http.end();
-  }
-}
+//     http.end();
+//   }
+// }

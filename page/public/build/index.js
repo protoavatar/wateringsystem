@@ -6,7 +6,23 @@ var EstadoRiego = "<#RIE#R1-0R2-0R3-0R4-0RT-0>";
 var connection = new WebSocket("ws://riego.local:81/", ["arduino"]);
 // var connection = new WebSocket('ws://45.174.63.6:81/', ['arduino']);
 connection.onopen = function () {
+	var currentdate = new Date();
+
+	var datetime =
+		"<#TIM#" +
+		currentdate.getFullYear() +
+		(currentdate.getMonth() + 1).toString().padStart(2, "0") +
+		currentdate.getDate().toString().padStart(2, "0") +
+		currentdate.getHours().toString().padStart(2, "0") +
+		currentdate.getMinutes().toString().padStart(2, "0") +
+		currentdate.getSeconds().toString().padStart(2, "0") +
+		"#>";
+	console.log("Connected...");
+	console.log(datetime);
+
 	connection.send("Index");
+	// connection.send("<#TIM#202305161659#>");
+	connection.send(datetime);
 };
 connection.onerror = function (error) {
 	console.log("WebSocket Error ", error);
